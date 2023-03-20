@@ -67,7 +67,7 @@ struct GeometryFX_FilterStatistics
 struct GeometryFX_FilterRenderOptions
 {
     inline GeometryFX_FilterRenderOptions()
-        : enableFiltering(true)
+        : enableFiltering(false)
         , enabledFilters(0xFF)
         , statistics(nullptr)
     {
@@ -210,7 +210,6 @@ class AMD_GEOMETRYFX_DLL_API GeometryFX_Filter
     // Disable the copy constructor
     GeometryFX_Filter(const GeometryFX_Filter &);
     GeometryFX_Filter &operator=(const GeometryFX_Filter &);
-
     struct GeometryFX_OpaqueFilterDesc;
     GeometryFX_OpaqueFilterDesc *impl_;
 };

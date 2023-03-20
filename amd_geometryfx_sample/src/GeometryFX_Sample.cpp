@@ -454,7 +454,7 @@ class Application
 {
   public:
     Application()
-        : enableFiltering(true)
+        : enableFiltering(false)
         , instrumentIndirectRender(false)
         , generateGeometry(false)
         , geometryChunkSize(65535)
@@ -1082,6 +1082,13 @@ void RenderText()
         g_Application.GetMeshCount());
     g_pTxtHelper->DrawTextLine(wcbuf);
 
+    {
+        wchar_t buffer[512] = {};
+        swprintf_s(buffer, L"Triangle stats: %I64d, cluster stats: %I64d",
+            g_Application.pipelineStatsTrianglesOut, g_Application.pipelineStatsClustersOut);
+        g_pTxtHelper->DrawTextLine(buffer);
+    }
+
     // Only display filter stats if the filter is actually running
     if (g_Application.instrumentIndirectRender && g_Application.enableFiltering)
     {
@@ -1143,7 +1150,7 @@ HRESULT CALLBACK OnD3D11CreateDevice(
 
     // Setup the camera's view parameters
     g_Camera.SetViewParams(
-        XMVectorSet(-0.409059107f, -0.047107596f,  0.101811841f, 0.0f),
+        XMVectorSet(-1.17315018, 0.140946746, 0.288295835, 0.0f),
         XMVectorSet( 0.553191245f, -0.239557669f, -0.090638265f, 0.0f));
     if (g_Application.shadowMapResolution == -1)
     {

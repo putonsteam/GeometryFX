@@ -29,6 +29,8 @@
 
 #include <DirectXMath.h>
 
+using namespace std;
+using namespace DirectX;
 namespace AMD
 {
 namespace GeometryFX_Internal
@@ -60,6 +62,20 @@ public:
     {
         DirectX::XMVECTOR aabbMin, aabbMax;
         DirectX::XMVECTOR coneCenter, coneAxis;
+        // 面的顺序: 左->右->上->下->前->后
+        XMVECTOR frustumPlaneLeft[6];
+        XMVECTOR frustumPlaneRight[6];
+        XMVECTOR frustumPlaneTop[6];
+        XMVECTOR frustumPlaneBottom[6];
+        XMVECTOR frustumPlaneFront[6];
+        XMVECTOR frustumPlaneBack[6];
+        vector<int> indicesLeft;
+        vector<int> indicesRight;
+        vector<int> indicesTop;
+        vector<int> indicesBottom;
+        vector<int> indicesFront;
+        vector<int> indicesBack;
+        vector<int> indices;
 
         float coneAngleCosine;
         bool valid;

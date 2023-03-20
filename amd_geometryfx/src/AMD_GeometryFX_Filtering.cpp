@@ -970,7 +970,122 @@ private:
         context->CSSetUnorderedAccessViews(0, 1, uavViews, initialCounts);
     }
 
-    void RenderGeometryDefault(ID3D11DeviceContext *context, FilterContext & /* filterContext */) const
+    bool insidePlane(XMVECTOR* frustumPlane, XMVECTOR& eye)
+    {
+        bool inside = true;
+        for (int i = 0; i < 6; ++i)
+        {
+            XMVECTOR dist1 = XMVector4Dot(frustumPlane[i], XMVectorSet(XMVectorGetX(eye), XMVectorGetY(eye), XMVectorGetZ(eye), 1.0f));
+            float dist = XMVectorGetX(dist1);
+            if (dist < 0.0f)
+            {
+                inside = false;
+                break;
+            }
+        }
+        return inside;
+    }
+
+    void* GetindexData(StaticMesh::Cluster& info, XMVECTOR& eye, size_t& index)
+    {
+        if (insidePlane(info.frustumPlaneLeft, eye))
+        {
+            index = info.indicesLeft.size();
+            return info.indicesLeft.data();
+        }
+        if (insidePlane(info.frustumPlaneRight, eye))
+        {
+            index = info.indicesRight.size();
+            return info.indicesRight.data();
+        }
+        if (insidePlane(info.frustumPlaneTop, eye))
+        {
+            index = info.indicesTop.size();
+            return info.indicesTop.data();
+        }
+        if (insidePlane(info.frustumPlaneBottom, eye))
+        {
+            index = info.indicesBottom.size();
+            return info.indicesBottom.data();
+        }
+        if (insidePlane(info.frustumPlaneFront, eye))
+        {
+            index = info.indicesFront.size();
+            return info.indicesFront.data();
+        }
+        if (insidePlane(info.frustumPlaneBack, eye))
+        {
+            index = info.indicesBack.size();
+            return info.indicesBack.data();
+        }
+
+        if ((info.aabbMax.m128_f32[0] >= eye.m128_f32[0]) && (eye.m128_f32[0] >= info.aabbMin.m128_f32[0]) &&
+            (info.aabbMax.m128_f32[1] >= eye.m128_f32[1]) && (eye.m128_f32[1] >= info.aabbMin.m128_f32[1]) &&
+            (info.aabbMax.m128_f32[2] >= eye.m128_f32[2]) && (eye.m128_f32[2] >= info.aabbMin.m128_f32[2]))
+        {
+            index = info.indices.size();
+            return info.indices.data();
+        }
+        return nullptr;
+    }
+
+	void UpdateIndexBuffer(ID3D11DeviceContext* context, DrawCommand& dc, FilterContext& filterContext, int& indexOffset)
+	{
+        GeometryFX_Internal::StaticMesh* mesh = dc.mesh;
+        mesh->indexCount = 0;
+        mesh->indexOffset = indexOffset;
+        auto eye = DirectX::XMVector4Transform(filterContext.eye, XMMatrixInverse(nullptr, dc.dcb.world));
+        for (int currentCluster = 0; currentCluster < mesh->clusters.size(); ++currentCluster)
+        {
+            auto& clusterInfo = mesh->clusters[currentCluster];
+
+            bool cullCluster = false;
+
+            if (((filterContext.options->enabledFilters & GeometryFX_ClusterFilterBackface) != 0) && clusterInfo.valid)
+            {
+                const auto testVec = DirectX::XMVector3Normalize(DirectX::XMVectorSubtract(eye, clusterInfo.coneCenter));
+                // Check if we're inside the cone
+                if (DirectX::XMVectorGetX(DirectX::XMVector3Dot(testVec, clusterInfo.coneAxis)) > clusterInfo.coneAngleCosine)
+                {
+                    cullCluster = true;
+                }
+            }
+
+
+			if (!cullCluster)
+			{
+				const void* indexData = clusterInfo.indices.data();
+                size_t index = clusterInfo.indices.size();
+
+				if (((filterContext.options->enabledFilters & GeometryFX_FilterBackface) != 0) && clusterInfo.valid)
+				{
+					indexData = GetindexData(clusterInfo, eye, index);
+				}
+
+				if (indexData)
+				{
+					D3D11_BOX dstBox;
+					dstBox.top = 0;
+					dstBox.bottom = 1;
+					dstBox.front = 0;
+					dstBox.back = 1;
+
+					dstBox.left = indexOffset;
+					int offset = (int)index * sizeof(int);
+					dstBox.right = dstBox.left + offset;
+					indexOffset += offset;
+					mesh->indexCount += (int)index;
+					context->UpdateSubresource(mesh->indexBuffer.Get(), 0, &dstBox, indexData, 0, 0);
+                    if (filterContext.options->statistics)
+                    {
+                        filterContext.options->statistics->clustersRendered += 1;
+                    }
+				}
+			}
+        }
+	}
+
+    void RenderGeometryDefault(ID3D11DeviceContext *context, FilterContext & filterContext) 
     {
         assert(context);
         ComPtr<ID3DUserDefinedAnnotation> annotation;
@@ -984,20 +1099,33 @@ private:
         {
             annotation->BeginEvent(L"Depth pass");
         }
-
-        for (std::vector<DrawCommand>::const_iterator it = drawCommands_.begin(),
+        int indexOffset = 0;
+        for (std::vector<DrawCommand>::iterator it = drawCommands_.begin(),
             end = drawCommands_.end();
             it != end; ++it)
         {
-            ID3D11Buffer *vertexBuffers[] = { it->mesh->vertexBuffer.Get() };
-            UINT strides[] = { sizeof(float) * 3 };
-            UINT offsets[] = { static_cast<UINT>(it->mesh->vertexOffset) };
-            context->IASetVertexBuffers(0, 1, vertexBuffers, strides, offsets);
-            context->IASetIndexBuffer(
-                it->mesh->indexBuffer.Get(), DXGI_FORMAT_R32_UINT, it->mesh->indexOffset);
-            ID3D11Buffer *constantBuffers[] = { drawCallConstantBuffers_[it->drawCallId].Get() };
-            context->VSSetConstantBuffers(0, 1, constantBuffers);
-            context->DrawIndexed(it->mesh->indexCount, 0, 0);
+            UpdateIndexBuffer(context, *it, filterContext, indexOffset);
+        }
+        for (std::vector<DrawCommand>::iterator it = drawCommands_.begin(),
+            end = drawCommands_.end();
+            it != end; ++it)
+        {
+            if (it->mesh->indexCount)
+            {
+                ID3D11Buffer* vertexBuffers[] = { it->mesh->vertexBuffer.Get() };
+                UINT strides[] = { sizeof(float) * 3 };
+                UINT offsets[] = { static_cast<UINT>(it->mesh->vertexOffset) };
+                context->IASetVertexBuffers(0, 1, vertexBuffers, strides, offsets);
+                context->IASetIndexBuffer(
+                    it->mesh->indexBuffer.Get(), DXGI_FORMAT_R32_UINT, it->mesh->indexOffset);
+                ID3D11Buffer* constantBuffers[] = { drawCallConstantBuffers_[it->drawCallId].Get() };
+                context->VSSetConstantBuffers(0, 1, constantBuffers);
+                context->DrawIndexed(it->mesh->indexCount, 0, 0);
+                if (filterContext.options->statistics)
+                {
+                    filterContext.options->statistics->trianglesRendered += (it->mesh->indexCount / 3);
+                }
+            }
         }
 
         if (annotation.Get() != nullptr)
